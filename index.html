@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>World Cup 2026 — Pick'em Pool</title>
+
+<!--
+=====================================================================
+ WORLD CUP 2026 PICK'EM POOL  —  standalone web app
+=====================================================================
+ Everyone picks who wins every match. The organizer enters real
+ results; correct picks score points; a live table ranks everyone.
+ Country flags on every team. Easy for ages 12+.
+
+ RUNS IMMEDIATELY in single-device LOCAL mode. For MULTIPLAYER:
+  1. console.firebase.google.com -> Add project (free)
+  2. Build > Realtime Database > Create (test mode)
+  3. Rules -> { "rules": { ".read": true, ".write": true } } -> Publish
+  4. Project settings > Your apps > Web (</>) -> copy firebaseConfig
+  5. Paste into FIREBASE_CONFIG below, re-upload, share the link.
+ Separate pools: add a URL hash, e.g.  pool.html#friends2026
+ Flags load from flagcdn.com (needs internet; falls back to a code).
+=====================================================================
+-->
+
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Anton&family=Hanken+Grotesk:wght@400;500;700;800&family=Space+Mono:wght@400;700&display=swap');
+  :root{
+    --bg:#f3efe6; --panel:#ffffff; --panel2:#fff6e0; --line:#e4ddcd;
+    --ink:#15233f; --muted:#8d8470; --gold:#dd9f23; --coral:#e8563f;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;background:var(--bg);}
+  body{font-family:'Hanken Grotesk',sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased;}
+  .anton{font-family:'Anton',sans-serif;letter-spacing:.01em;}
+  .mono{font-family:'Space Mono',monospace;}
+  input,select{font-family:'Hanken Grotesk',sans-serif;border-radius:10px;}
+  ::placeholder{color:#b3ab97;}
+  @keyframes rise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+  @keyframes pop{0%{transform:scale(.85)}60%{transform:scale(1.06)}100%{transform:scale(1)}}
+  @keyframes fade{from{opacity:0}to{opacity:1}}
+  .rise{animation:rise .45s cubic-bezier(.2,.7,.2,1) both;}
+  .btn{cursor:pointer;border:none;font-weight:800;border-radius:11px;transition:transform .12s,filter .12s,box-shadow .12s;}
+  .btn:active{transform:translateY(1px) scale(.99);}
+  .btn:disabled{cursor:default;}
+  .card{background:var(--panel);border:1.5px solid var(--line);border-radius:16px;box-shadow:0 2px 10px rgba(21,35,63,.05);}
+  .flag{object-fit:cover;border-radius:3px;flex-shrink:0;box-shadow:0 0 0 1px rgba(21,35,63,.14),0 1px 2px rgba(21,35,63,.18);background:#eee;}
+  .stripe{height:4px;background:linear-gradient(90deg,#dd9f23 0%,#e8563f 35%,#16a3a3 68%,#3b6fe0 100%);}
+  #root{min-height:100vh;}
+  .boot{min-height:100vh;display:grid;place-items:center;color:var(--gold);}
+</style>
+
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+</head>
+<body>
+<div id="root"><div class="boot"><span class="anton" style="font-size:28px">LOADING…</span></div></div>
+
+<!-- ======================= PASTE FIREBASE CONFIG HERE ======================= -->
+<script>
+  window.FIREBASE_CONFIG = {
+    apiKey: "AIzaSyBqRoUFx4AW7HLnlNZc3z870RuEM9UjtDM",
+    authDomain: "wc-pool-a9f00.firebaseapp.com",
+    databaseURL: "https://wc-pool-a9f00-default-rtdb.firebaseio.com",
+    projectId: "wc-pool-a9f00",
+    storageBucket: "wc-pool-a9f00.firebasestorage.app",
+    messagingSenderId: "844539852407",
+    appId: "1:844539852407:web:590af617f1be74cb207872"
+  };
+</script>
+<!-- ========================================================================== -->
+
+<script type="text/babel">
+const { useState, useEffect } = React;
+
+/* ============ TEAMS + FLAGS (real 2026) ============ */
+const GROUPS = {
+  A:["Mexico","South Korea","South Africa","Czechia"],
+  B:["Canada","Switzerland","Qatar","Bosnia-Herzegovina"],
+  C:["Brazil","Morocco","Scotland","Haiti"],
+  D:["USA","Paraguay","Australia","Turkiye"],
+  E:["Germany","Ecuador","Ivory Coast","Curacao"],
+  F:["Netherlands","Japan","Tunisia","Sweden"],
+  G:["Belgium","Iran","Egypt","New Zealand"],
+  H:["Spain","Uruguay","Saudi Arabia","Cape Verde"],
+  I:["France","Senegal","Norway","Iraq"],
+  J:["Argentina","Austria","Algeria","Jordan"],
+  K:["Portugal","Colombia","Uzbekistan","DR Congo"],
+  L:["England","Croatia","Panama","Ghana"],
+};
+const FLAGS = {
+  "Mexico":"mx","South Korea":"kr","South Africa":"za","Czechia":"cz",
+  "Canada":"ca","Switzerland":"ch","Qatar":"qa","Bosnia-Herzegovina":"ba",
+  "Brazil":"br","Morocco":"ma","Scotland":"gb-sct","Haiti":"ht",
+  "USA":"us","Paraguay":"py","Australia":"au","Turkiye":"tr",
+  "Germany":"de","Ecuador":"ec","Ivory Coast":"ci","Curacao":"cw",
+  "Netherlands":"nl","Japan":"jp","Tunisia":"tn","Sweden":"se",
+  "Belgium":"be","Iran":"ir","Egypt":"eg","New Zealand":"nz",
+  "Spain":"es","Uruguay":"uy","Saudi Arabia":"sa","Cape Verde":"cv",
+  "France":"fr","Senegal":"sn","Norway":"no","Iraq":"iq",
+  "Argentina":"ar","Austria":"at","Algeria":"dz","Jordan":"jo",
+  "Portugal":"pt","Colombia":"co","Uzbekistan":"uz","DR Congo":"cd",
+  "England":"gb-eng","Croatia":"hr","Panama":"pa","Ghana":"gh",
+};
+const GLETTERS = Object.keys(GROUPS);
+const RR = [[0,1],[2,3],[0,2],[3,1],[0,3],[1,2]];
+const GROUP_MATCHES = [];
+GLETTERS.forEach(g=>{ RR.forEach((pair,i)=>{ GROUP_MATCHES.push({id:`G-${g}-${i}`,group:g,home:GROUPS[g][pair[0]],away:GROUPS[g][pair[1]]}); }); });
+
+const KO = {
+  73:{stage:"R32",a:{t:"RU",g:"A"},b:{t:"RU",g:"B"}},
+  74:{stage:"R32",a:{t:"W",g:"E"},b:{t:"T",cl:["A","B","C","D","F"]}},
+  75:{stage:"R32",a:{t:"W",g:"F"},b:{t:"RU",g:"C"}},
+  76:{stage:"R32",a:{t:"W",g:"C"},b:{t:"RU",g:"F"}},
+  77:{stage:"R32",a:{t:"W",g:"I"},b:{t:"T",cl:["C","D","F","G","H"]}},
+  78:{stage:"R32",a:{t:"RU",g:"E"},b:{t:"RU",g:"I"}},
+  79:{stage:"R32",a:{t:"W",g:"A"},b:{t:"T",cl:["C","E","F","H","I"]}},
+  80:{stage:"R32",a:{t:"W",g:"L"},b:{t:"T",cl:["E","H","I","J","K"]}},
+  81:{stage:"R32",a:{t:"W",g:"D"},b:{t:"T",cl:["B","E","F","I","J"]}},
+  82:{stage:"R32",a:{t:"W",g:"G"},b:{t:"T",cl:["A","E","H","I","J"]}},
+  83:{stage:"R32",a:{t:"RU",g:"K"},b:{t:"RU",g:"L"}},
+  84:{stage:"R32",a:{t:"W",g:"H"},b:{t:"RU",g:"J"}},
+  85:{stage:"R32",a:{t:"W",g:"B"},b:{t:"T",cl:["E","F","G","I","J"]}},
+  86:{stage:"R32",a:{t:"W",g:"J"},b:{t:"RU",g:"H"}},
+  87:{stage:"R32",a:{t:"W",g:"K"},b:{t:"T",cl:["D","E","I","J","L"]}},
+  88:{stage:"R32",a:{t:"RU",g:"D"},b:{t:"RU",g:"G"}},
+  89:{stage:"R16",a:{t:"WIN",m:74},b:{t:"WIN",m:77}},
+  90:{stage:"R16",a:{t:"WIN",m:73},b:{t:"WIN",m:75}},
+  91:{stage:"R16",a:{t:"WIN",m:76},b:{t:"WIN",m:78}},
+  92:{stage:"R16",a:{t:"WIN",m:79},b:{t:"WIN",m:80}},
+  93:{stage:"R16",a:{t:"WIN",m:83},b:{t:"WIN",m:84}},
+  94:{stage:"R16",a:{t:"WIN",m:81},b:{t:"WIN",m:82}},
+  95:{stage:"R16",a:{t:"WIN",m:86},b:{t:"WIN",m:88}},
+  96:{stage:"R16",a:{t:"WIN",m:85},b:{t:"WIN",m:87}},
+  97:{stage:"QF",a:{t:"WIN",m:89},b:{t:"WIN",m:90}},
+  98:{stage:"QF",a:{t:"WIN",m:93},b:{t:"WIN",m:94}},
+  99:{stage:"QF",a:{t:"WIN",m:91},b:{t:"WIN",m:92}},
+  100:{stage:"QF",a:{t:"WIN",m:95},b:{t:"WIN",m:96}},
+  101:{stage:"SF",a:{t:"WIN",m:97},b:{t:"WIN",m:98}},
+  102:{stage:"SF",a:{t:"WIN",m:99},b:{t:"WIN",m:100}},
+  103:{stage:"3RD",a:{t:"LOSE",m:101},b:{t:"LOSE",m:102}},
+  104:{stage:"FINAL",a:{t:"WIN",m:101},b:{t:"WIN",m:102}},
+};
+const KO_IDS = Object.keys(KO).map(Number).sort((a,b)=>a-b);
+const THIRD_SLOTS = KO_IDS.filter(id=>KO[id].a.t==="T"||KO[id].b.t==="T");
+const STAGE_LABEL = {R32:"Round of 32",R16:"Round of 16",QF:"Quarterfinals",SF:"Semifinals","3RD":"3rd-place game",FINAL:"The Final"};
+const STAGE_ORDER = ["R32","R16","QF","SF","3RD","FINAL"];
+
+/* ============ storage ============ */
+const POOL_ID=(location.hash.replace('#','').trim()||'default').replace(/[.#$\[\]\/]/g,'_');
+const DEFAULT_CONFIG={adminPin:null,thirds:{},pts:{group:1,R32:2,R16:3,QF:4,SF:5,"3RD":2,FINAL:7}};
+const FB=window.FIREBASE_CONFIG||{};
+const USE_FB=!!(FB.apiKey&&FB.databaseURL);
+const LSKEY="wc26:state:"+POOL_ID, MEKEY="wc26:me:"+POOL_ID, HELPKEY="wc26:help:"+POOL_ID;
+
+function normalize(raw){
+  raw=raw||{};
+  return {
+    players:raw.players||{}, picks:raw.picks||{}, results:raw.results||{},
+    config:Object.assign({},DEFAULT_CONFIG,raw.config||{},{pts:Object.assign({},DEFAULT_CONFIG.pts,(raw.config||{}).pts||{}),thirds:(raw.config||{}).thirds||{}}),
+  };
+}
+const Store=(()=>{
+  if(USE_FB){
+    firebase.initializeApp(FB);
+    const base=firebase.database().ref('pools/'+POOL_ID);
+    return {mode:'firebase',
+      init(cb){base.on('value',s=>cb(normalize(s.val())));},
+      savePlayer:(pid,o)=>base.child('players/'+pid).set(o),
+      savePick:(mid,pid,v)=>base.child('picks/'+mid+'/'+pid).set(v),
+      saveResult:(mid,o)=>base.child('results/'+mid).set(o),
+      clearResult:(mid)=>base.child('results/'+mid).remove(),
+      updatePlayer:(pid,o)=>base.child('players/'+pid).set(o),
+      removePlayer:(pid)=>{const u={['players/'+pid]:null};GROUP_MATCHES.forEach(m=>u['picks/'+m.id+'/'+pid]=null);KO_IDS.forEach(k=>u['picks/M'+k+'/'+pid]=null);base.update(u);},
+      saveConfig:(o)=>base.child('config').set(o)};
+  }
+  let state=(()=>{try{return JSON.parse(localStorage.getItem(LSKEY))||{players:{},picks:{},results:{},config:DEFAULT_CONFIG};}catch(e){return {players:{},picks:{},results:{},config:DEFAULT_CONFIG};}})();
+  let cb=null;
+  const persist=()=>{localStorage.setItem(LSKEY,JSON.stringify(state));cb&&cb(normalize(JSON.parse(JSON.stringify(state))));};
+  window.addEventListener('storage',e=>{if(e.key===LSKEY){try{state=JSON.parse(e.newValue)||state;}catch(_){}cb&&cb(normalize(JSON.parse(JSON.stringify(state))));}});
+  return {mode:'local',
+    init(fn){cb=fn;cb(normalize(JSON.parse(JSON.stringify(state))));},
+    savePlayer:(pid,o)=>{state.players[pid]=o;persist();},
+    savePick:(mid,pid,v)=>{state.picks[mid]=state.picks[mid]||{};state.picks[mid][pid]=v;persist();},
+    saveResult:(mid,o)=>{state.results[mid]=o;persist();},
+    clearResult:(mid)=>{delete state.results[mid];persist();},
+    updatePlayer:(pid,o)=>{state.players[pid]=o;persist();},
+    removePlayer:(pid)=>{delete state.players[pid];Object.keys(state.picks).forEach(mid=>{if(state.picks[mid])delete state.picks[mid][pid];});persist();},
+    saveConfig:(o)=>{state.config=o;persist();}};
+})();
+
+/* ============ helpers ============ */
+const id=()=>Math.random().toString(36).slice(2,9);
+const slug=s=>s.trim().toLowerCase().replace(/\s+/g," ");
+const initials=n=>n.split(/\s+/).map(w=>w[0]).join("").slice(0,2).toUpperCase();
+const PAL=["#dd9f23","#e8563f","#16a3a3","#c0397b","#3b6fe0","#7a4fd0","#2f9e44","#e07b39","#0d8abf","#b5179e","#1f9c8a","#d6a400","#5a7d2a","#c44536","#2a6f97","#9c4dcc"];
+const colorFor=(pid,players)=>{const ids=Object.keys(players).sort();const i=ids.indexOf(pid);return PAL[(i<0?0:i)%PAL.length];};
+const C={
+  bg:"#f3efe6", panel:"#ffffff", panel2:"#fff6e0", line:"#e4ddcd",
+  text:"#15233f", muted:"#8d8470", gold:"#dd9f23", lime:"#dd9f23",
+  coral:"#e8563f", orange:"#e8563f", tint:"#fdecea", navy:"#15233f",
+};
+const grResult=(hs,as)=>hs>as?"H":hs<as?"A":"D";
+
+function Flag({team,size=22}){
+  const code=FLAGS[team]; const [err,setErr]=useState(false);
+  if(!team) return null;
+  if(err||!code) return <span className="mono" style={{fontSize:9,fontWeight:700,background:"#eee5d2",color:C.muted,padding:"2px 3px",borderRadius:3,flexShrink:0}}>{team.slice(0,3).toUpperCase()}</span>;
+  return <img className="flag" alt="" width={size} height={Math.round(size*0.72)}
+    src={`https://flagcdn.com/w40/${code}.png`} srcSet={`https://flagcdn.com/w80/${code}.png 2x`} onError={()=>setErr(true)} />;
+}
+
+function standingsFor(letter,results){
+  const teams=GROUPS[letter];
+  const row={}; teams.forEach(t=>row[t]={team:t,P:0,W:0,D:0,L:0,GF:0,GA:0,GD:0,Pts:0});
+  let played=0;
+  GROUP_MATCHES.filter(m=>m.group===letter).forEach(m=>{
+    const r=results[m.id]; if(!r||r.hs==null) return; played++;
+    const h=row[m.home],a=row[m.away];
+    h.P++;a.P++;h.GF+=r.hs;h.GA+=r.as;a.GF+=r.as;a.GA+=r.hs;
+    if(r.hs>r.as){h.W++;a.L++;h.Pts+=3;} else if(r.hs<r.as){a.W++;h.L++;a.Pts+=3;} else{h.D++;a.D++;h.Pts++;a.Pts++;}
+  });
+  teams.forEach(t=>row[t].GD=row[t].GF-row[t].GA);
+  const ordered=teams.map(t=>row[t]).sort((x,y)=>y.Pts-x.Pts||y.GD-x.GD||y.GF-x.GF||x.team.localeCompare(y.team));
+  return {ordered,complete:played===6};
+}
+function allStandings(results){const o={};GLETTERS.forEach(g=>o[g]=standingsFor(g,results));return o;}
+function qualifiedThirds(st){
+  const thirds=GLETTERS.map(g=>({g,row:st[g].ordered[2]}));
+  const ranked=[...thirds].sort((a,b)=>b.row.Pts-a.row.Pts||b.row.GD-a.row.GD||b.row.GF-a.row.GF);
+  return {top8:new Set(ranked.slice(0,8).map(x=>x.g)),ranked};
+}
+let koCache={};
+function resolveSide(s,st,results,cfg,slotId){
+  if(s.t==="W"){const g=st[s.g];return g.complete?g.ordered[0].team:null;}
+  if(s.t==="RU"){const g=st[s.g];return g.complete?g.ordered[1].team:null;}
+  if(s.t==="T"){const g=cfg.thirds&&cfg.thirds[slotId];if(!g)return null;const sg=st[g];return sg.complete?sg.ordered[2].team:null;}
+  if(s.t==="WIN"){const r=results["M"+s.m];return r&&r.w?r.w:null;}
+  if(s.t==="LOSE"){const r=results["M"+s.m];if(!r||!r.w)return null;const t=koCache[s.m];if(!t)return null;return t.a===r.w?t.b:(t.b===r.w?t.a:null);}
+  return null;
+}
+function resolveMatch(mid,st,results,cfg){
+  const d=KO[mid];
+  const a=resolveSide(d.a,st,results,cfg,mid), b=resolveSide(d.b,st,results,cfg,mid);
+  koCache[mid]={a,b}; return {a,b,stage:d.stage};
+}
+function scoreboard(players,picks,results,cfg){
+  const st=allStandings(results); koCache={}; KO_IDS.forEach(mid=>resolveMatch(mid,st,results,cfg));
+  const rows=Object.values(players).map(p=>({...p,pts:0,correct:0,made:0}));
+  const byId={}; rows.forEach(r=>byId[r.id]=r);
+  GROUP_MATCHES.forEach(m=>{const r=results[m.id];Object.entries(picks[m.id]||{}).forEach(([pid,v])=>{const row=byId[pid];if(!row)return;row.made++;if(r&&r.hs!=null&&v===grResult(r.hs,r.as)){row.correct++;row.pts+=cfg.pts.group;}});});
+  KO_IDS.forEach(mid=>{const r=results["M"+mid];const stage=KO[mid].stage;Object.entries(picks["M"+mid]||{}).forEach(([pid,v])=>{const row=byId[pid];if(!row)return;row.made++;if(r&&r.w&&v===r.w){row.correct++;row.pts+=(cfg.pts[stage]||1);}});});
+  return rows.sort((a,b)=>b.pts-a.pts||b.correct-a.correct||a.name.localeCompare(b.name));
+}
+
+function ProgressBar({done,total}){
+  const pct=total?Math.round(done/total*100):0;
+  return (
+    <div style={{margin:"4px 0 16px"}}>
+      <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
+        <span className="mono" style={{fontSize:11,color:C.muted}}>your picks</span>
+        <span className="mono" style={{fontSize:11,fontWeight:700,color:pct===100?C.gold:C.muted}}>{done} / {total}{pct===100?"  ✓ all done!":""}</span>
+      </div>
+      <div style={{height:9,background:"#eadfca",borderRadius:99,overflow:"hidden"}}>
+        <div style={{height:"100%",width:pct+"%",background:`linear-gradient(90deg,${C.gold},#f0b53e)`,transition:"width .3s"}}/>
+      </div>
+    </div>
+  );
+}
+
+/* ============ App ============ */
+function App(){
+  const [st,setSt]=useState({players:{},picks:{},results:{},config:DEFAULT_CONFIG});
+  const [me,setMe]=useState(null);
+  const [ready,setReady]=useState(false);
+  const [tab,setTab]=useState("groups");
+  const [adminUnlocked,setAdminUnlocked]=useState(false);
+  const [toast,setToast]=useState(null);
+  const [help,setHelp]=useState(false);
+  const flash=m=>{setToast(m);setTimeout(()=>setToast(null),2000);};
+
+  useEffect(()=>{
+    Store.init(s=>{setSt(s);setReady(true);});
+    try{const sv=JSON.parse(localStorage.getItem(MEKEY));if(sv&&sv.pid)setMe(sv);}catch(e){}
+  },[]);
+  useEffect(()=>{ if(me){ try{ if(!localStorage.getItem(HELPKEY)){setHelp(true);localStorage.setItem(HELPKEY,"1");} }catch(e){} } },[me]);
+
+  const {players,picks,results,config}=st;
+  const saveMe=m=>{setMe(m);try{localStorage.setItem(MEKEY,JSON.stringify(m));}catch(e){}};
+  const logout=()=>{setMe(null);setAdminUnlocked(false);try{localStorage.removeItem(MEKEY);}catch(e){}};
+  function handleLogin(name,pin){
+    if(!name.trim())return flash("Type your name");
+    if(!/^\d{4}$/.test(pin))return flash("PIN must be 4 numbers");
+    const ex=Object.values(players).find(p=>slug(p.name)===slug(name));
+    if(ex){ if(ex.pin!==pin)return flash("That PIN doesn't match"); saveMe({pid:ex.id,name:ex.name}); }
+    else{ const pid=id(); Store.savePlayer(pid,{id:pid,name:name.trim(),pin}); saveMe({pid,name:name.trim()}); }
+  }
+  const pick=(mid,v)=>{ if(me) Store.savePick(mid,me.pid,v); };
+
+  if(!ready)return <div className="boot"><span className="anton" style={{fontSize:28,color:C.gold}}>LOADING…</span></div>;
+  if(!me)return <Login onLogin={handleLogin} toast={toast} mode={Store.mode} />;
+
+  const board=scoreboard(players,picks,results,config);
+  const meRow=board.find(r=>r.id===me.pid)||{pts:0};
+  const rank=board.findIndex(r=>r.id===me.pid)+1;
+  const standings=allStandings(results);
+
+  return (
+    <div style={{minHeight:"100vh"}}>
+      <div style={{position:"sticky",top:0,zIndex:20,background:"rgba(243,239,230,.92)",backdropFilter:"blur(8px)",borderBottom:`1px solid ${C.line}`}}>
+        <div style={{maxWidth:760,margin:"0 auto",padding:"12px 14px",display:"flex",alignItems:"center",gap:11}}>
+          <div style={{width:36,height:36,background:`linear-gradient(135deg,${C.gold},#f0c14b)`,display:"grid",placeItems:"center",borderRadius:11,transform:"rotate(-5deg)",boxShadow:"0 3px 8px rgba(221,159,35,.4)"}}><span className="anton" style={{color:C.navy,fontSize:17,transform:"rotate(5deg)"}}>26</span></div>
+          <div style={{lineHeight:1.05}}>
+            <div className="anton" style={{fontSize:18,color:C.navy}}>WORLD CUP PICK'EM</div>
+            <div className="mono" style={{fontSize:11,color:C.muted,marginTop:2}}>{me.name} · <b style={{color:C.gold}}>{meRow.pts} pts</b>{rank?` · #${rank}`:""}</div>
+          </div>
+          <button className="btn" onClick={()=>setHelp(true)} title="How to play" style={{marginLeft:"auto",background:C.panel,color:C.gold,border:`1.5px solid ${C.line}`,width:34,height:34,borderRadius:99,fontSize:15}}>?</button>
+          <button className="btn mono" onClick={logout} style={{background:C.panel,color:C.muted,border:`1.5px solid ${C.line}`,padding:"7px 11px",fontSize:11,borderRadius:9}}>exit</button>
+        </div>
+        <div style={{maxWidth:760,margin:"0 auto",display:"flex",gap:6,padding:"0 10px 10px",overflowX:"auto"}}>
+          {[["groups","GROUP GAMES"],["bracket","KNOCKOUTS"],["board","SCORES"],["admin","ORGANIZER"]].map(([k,l])=>(
+            <button key={k} className="btn anton" onClick={()=>setTab(k)} style={{flex:"1 0 auto",minWidth:92,background:tab===k?`linear-gradient(135deg,${C.gold},#f0c14b)`:C.panel,color:tab===k?C.navy:C.muted,padding:"9px 8px",fontSize:13,letterSpacing:".02em",border:`1.5px solid ${tab===k?"transparent":C.line}`,boxShadow:tab===k?"0 3px 8px rgba(221,159,35,.3)":"none"}}>{l}</button>
+          ))}
+        </div>
+        <div className="stripe"/>
+      </div>
+
+      <div style={{maxWidth:760,margin:"0 auto",padding:"18px 14px 90px"}}>
+        {tab==="groups" && <GroupsTab picks={picks} results={results} me={me} onPick={pick} standings={standings} />}
+        {tab==="bracket" && <BracketTab picks={picks} results={results} cfg={config} me={me} onPick={pick} standings={standings} />}
+        {tab==="board" && <Board board={board} players={players} me={me} cfg={config} />}
+        {tab==="admin" && (adminUnlocked
+          ? <Admin cfg={config} results={results} standings={standings} players={players} picks={picks}
+              onResult={(mid,o)=>Store.saveResult(mid,o)} onClear={mid=>Store.clearResult(mid)} onConfig={o=>Store.saveConfig(o)}
+              onUpdatePlayer={(pid,o)=>Store.updatePlayer(pid,o)} onRemovePlayer={pid=>Store.removePlayer(pid)} flash={flash} />
+          : <AdminGate hasPin={!!config.adminPin} onUnlock={pin=>{
+              if(!config.adminPin){Store.saveConfig({...config,adminPin:pin});setAdminUnlocked(true);flash("You're the organizer now");}
+              else if(config.adminPin===pin){setAdminUnlocked(true);} else flash("Wrong organizer PIN");
+            }} />)}
+      </div>
+
+      {help && <HelpModal onClose={()=>setHelp(false)} />}
+      {toast && <div className="mono" style={{position:"fixed",bottom:18,left:"50%",transform:"translateX(-50%)",background:C.navy,color:"#fff",padding:"11px 18px",fontSize:13,fontWeight:700,zIndex:60,maxWidth:"90%",borderRadius:12,boxShadow:"0 6px 20px rgba(21,35,63,.3)",animation:"pop .25s"}}>{toast}</div>}
+    </div>
+  );
+}
+
+function HelpModal({onClose}){
+  const step=(n,title,body)=>(
+    <div style={{display:"flex",gap:12,marginBottom:14}}>
+      <div className="anton" style={{width:30,height:30,flexShrink:0,background:`linear-gradient(135deg,${C.gold},#f0c14b)`,color:C.navy,display:"grid",placeItems:"center",borderRadius:99,fontSize:16}}>{n}</div>
+      <div><div style={{fontWeight:800,marginBottom:2}}>{title}</div><div className="mono" style={{fontSize:12,color:C.muted,lineHeight:1.55}}>{body}</div></div>
+    </div>
+  );
+  return (
+    <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(21,35,63,.5)",zIndex:70,display:"grid",placeItems:"center",padding:18,animation:"fade .2s"}}>
+      <div onClick={e=>e.stopPropagation()} className="rise card" style={{width:"100%",maxWidth:400,padding:24,borderTop:`5px solid ${C.gold}`}}>
+        <div className="anton" style={{fontSize:24,marginBottom:16,color:C.navy}}>HOW TO PLAY</div>
+        {step(1,"Pick who wins","Tap the team you think will win each match. In group games you can also pick Draw. Tap again to change it.")}
+        {step(2,"Earn points","Every time your pick is right, you score. Picks lock once a game's result is in. Later rounds are worth more.")}
+        {step(3,"Climb the table","The SCORES tab ranks everyone by points. Most correct picks wins. That's it — good luck!")}
+        <button className="btn anton" onClick={onClose} style={{width:"100%",background:`linear-gradient(135deg,${C.gold},#f0c14b)`,color:C.navy,padding:13,fontSize:16,marginTop:6}}>GOT IT →</button>
+      </div>
+    </div>
+  );
+}
+
+/* ---- group pick ---- */
+function GroupPickRow({m,result,myPick,onPick}){
+  const fin=result&&result.hs!=null;
+  const actual=fin?grResult(result.hs,result.as):null;
+  const TeamBtn=({v,team})=>{
+    const sel=myPick===v, correct=fin&&actual===v, wrong=fin&&sel&&actual!==v;
+    return (
+      <button className="btn" disabled={fin} onClick={()=>onPick(m.id,v)}
+        style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:5,padding:"11px 4px",
+          background:correct?`linear-gradient(135deg,${C.gold},#f0c14b)`:sel?(wrong?C.tint:C.panel2):C.panel,
+          border:`2px solid ${correct?C.gold:sel?(wrong?C.coral:C.gold):C.line}`}}>
+        <Flag team={team} size={30}/>
+        <span style={{fontSize:11,fontWeight:700,lineHeight:1.1,color:correct?C.navy:wrong?C.coral:C.text,textAlign:"center"}}>{team}</span>
+      </button>
+    );
+  };
+  const DrawBtn=()=>{
+    const sel=myPick==="D", correct=fin&&actual==="D", wrong=fin&&sel&&actual!=="D";
+    return (
+      <button className="btn" disabled={fin} onClick={()=>onPick(m.id,"D")}
+        style={{width:62,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4,padding:"11px 4px",
+          background:correct?`linear-gradient(135deg,${C.gold},#f0c14b)`:sel?(wrong?C.tint:C.panel2):C.panel,
+          border:`2px solid ${correct?C.gold:sel?(wrong?C.coral:C.gold):C.line}`,
+          color:correct?C.navy:wrong?C.coral:C.muted}}>
+        <span style={{fontSize:18,fontWeight:800}}>=</span><span className="mono" style={{fontSize:10}}>Draw</span>
+      </button>
+    );
+  };
+  return (
+    <div style={{padding:"10px 0",borderTop:`1px solid ${C.line}`}}>
+      {fin && <div className="mono" style={{fontSize:11,color:C.coral,fontWeight:700,textAlign:"center",marginBottom:7}}>FULL TIME · {m.home} {result.hs}–{result.as} {m.away}</div>}
+      <div style={{display:"flex",gap:6,alignItems:"stretch"}}>
+        <TeamBtn v="H" team={m.home}/><DrawBtn/><TeamBtn v="A" team={m.away}/>
+      </div>
+    </div>
+  );
+}
+function GroupsTab({picks,results,me,onPick,standings}){
+  const [open,setOpen]=useState("A");
+  const myCount=GROUP_MATCHES.filter(m=>(picks[m.id]||{})[me.pid]!=null).length;
+  return (
+    <div className="rise">
+      <p className="mono" style={{fontSize:12,color:C.muted,marginBottom:4,lineHeight:1.6}}>Tap who wins each game — or Draw. Change anytime until the game is played.</p>
+      <ProgressBar done={myCount} total={GROUP_MATCHES.length}/>
+      {GLETTERS.map(g=>{
+        const ms=GROUP_MATCHES.filter(m=>m.group===g);
+        const isOpen=open===g, std=standings[g];
+        const picked=ms.filter(m=>(picks[m.id]||{})[me.pid]!=null).length;
+        return (
+          <div key={g} className="card" style={{marginBottom:11,overflow:"hidden"}}>
+            <button className="btn" onClick={()=>setOpen(isOpen?null:g)} style={{width:"100%",display:"flex",alignItems:"center",gap:8,background:isOpen?"#fbf7ee":"transparent",color:C.text,padding:"12px 14px",borderRadius:0}}>
+              <span className="anton" style={{fontSize:18,color:C.gold}}>GROUP {g}</span>
+              <span style={{display:"flex",gap:3,marginLeft:2}}>{GROUPS[g].map(t=><Flag key={t} team={t} size={18}/>)}</span>
+              <span className="mono" style={{marginLeft:"auto",fontSize:10,fontWeight:700,color:picked===6?C.gold:C.muted}}>{picked}/6 {isOpen?"▲":"▼"}</span>
+            </button>
+            {isOpen && (
+              <div style={{padding:"0 14px 12px"}}>
+                <div className="mono" style={{fontSize:11,marginBottom:4,marginTop:8,background:"#faf6ec",borderRadius:10,padding:"8px 10px"}}>
+                  {std.ordered.map((r,i)=>(
+                    <div key={r.team} style={{display:"flex",gap:8,alignItems:"center",padding:"3px 0",color:i<2?C.navy:i===2?C.text:C.muted,fontWeight:i<2?700:400}}>
+                      <span style={{width:12,color:i<2?C.gold:C.muted}}>{i+1}</span><Flag team={r.team} size={16}/><span style={{flex:1}}>{r.team}</span>
+                      <span>{r.Pts}p</span><span style={{width:30,textAlign:"right"}}>{r.GD>0?"+":""}{r.GD}</span>
+                    </div>
+                  ))}
+                  <div style={{color:C.muted,fontSize:9,marginTop:4}}>navy = advancing (top 2). 3rd place might also qualify.</div>
+                </div>
+                {ms.map(m=><GroupPickRow key={m.id} m={m} result={results[m.id]} myPick={(picks[m.id]||{})[me.pid]} onPick={onPick} />)}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ---- knockout pick ---- */
+function KOPickRow({mid,teams,result,myPick,onPick}){
+  const {a,b,stage}=teams; const known=a&&b; const fin=result&&result.w;
+  const TeamBtn=({team})=>{
+    if(!team) return <div className="mono" style={{flex:1,padding:"12px 4px",textAlign:"center",border:`2px dashed ${C.line}`,borderRadius:11,color:C.muted,fontSize:12}}>not decided yet</div>;
+    const sel=myPick===team, correct=fin&&result.w===team, wrong=fin&&sel&&result.w!==team;
+    return (
+      <button className="btn" disabled={!known||fin} onClick={()=>onPick("M"+mid,team)}
+        style={{flex:1,display:"flex",alignItems:"center",gap:8,padding:"11px 10px",
+          background:correct?`linear-gradient(135deg,${C.gold},#f0c14b)`:sel?(wrong?C.tint:C.panel2):C.panel,
+          border:`2px solid ${correct?C.gold:sel?(wrong?C.coral:C.gold):C.line}`}}>
+        <Flag team={team} size={26}/>
+        <span style={{fontSize:14,fontWeight:700,color:correct?C.navy:wrong?C.coral:C.text}}>{team}</span>
+      </button>
+    );
+  };
+  return (
+    <div className="card" style={{padding:"10px 11px",boxShadow:"none"}}>
+      <div className="mono" style={{fontSize:10,fontWeight:700,color:fin?C.gold:C.muted,marginBottom:6}}>{fin?`${result.w} goes through ✓`:known?"Tap who wins":"waiting for earlier games"}</div>
+      <div style={{display:"flex",gap:8,alignItems:"center"}}><TeamBtn team={a}/><span className="anton" style={{color:C.muted,fontSize:12}}>VS</span><TeamBtn team={b}/></div>
+    </div>
+  );
+}
+function BracketTab({picks,results,cfg,me,onPick,standings}){
+  koCache={};
+  const resolved={}; KO_IDS.forEach(mid=>resolved[mid]=resolveMatch(mid,standings,results,cfg));
+  const avail=KO_IDS.filter(mid=>resolved[mid].a&&resolved[mid].b);
+  const picked=avail.filter(mid=>(picks["M"+mid]||{})[me.pid]!=null).length;
+  return (
+    <div className="rise">
+      <p className="mono" style={{fontSize:12,color:C.muted,marginBottom:10,lineHeight:1.6}}>The real knockout games. Teams appear here once group games are played. Pick who advances — later rounds are worth more points.</p>
+      {avail.length>0 && <ProgressBar done={picked} total={avail.length}/>}
+      {avail.length===0 && <div className="card mono" style={{textAlign:"center",color:C.muted,padding:"34px 18px",fontSize:13,lineHeight:1.6}}>The knockout round unlocks once group games start finishing. Check back after the group stage! ⚽</div>}
+      {STAGE_ORDER.map(stage=>{
+        const ids=KO_IDS.filter(mid=>KO[mid].stage===stage && resolved[mid].a && resolved[mid].b);
+        if(ids.length===0) return null;
+        return (
+          <div key={stage} style={{marginBottom:18}}>
+            <div className="anton" style={{fontSize:17,color:C.navy,marginBottom:9}}>{STAGE_LABEL[stage].toUpperCase()} <span className="mono" style={{fontSize:10,color:C.gold,fontWeight:700}}>· {cfg.pts[stage]||1} pts each</span></div>
+            <div style={{display:"grid",gap:9}}>
+              {ids.map(mid=><KOPickRow key={mid} mid={mid} teams={resolved[mid]} result={results["M"+mid]} myPick={(picks["M"+mid]||{})[me.pid]} onPick={onPick} />)}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function Board({board,players,me,cfg}){
+  return (
+    <div className="rise">
+      {board.length===0?<div className="card mono" style={{textAlign:"center",color:C.muted,padding:"40px"}}>No players yet.</div>:
+      <div style={{display:"grid",gap:8}}>
+        <div className="mono" style={{display:"grid",gridTemplateColumns:"30px 1fr 64px 52px",gap:8,padding:"0 14px",fontSize:10,color:C.muted,textTransform:"uppercase",fontWeight:700}}>
+          <span>#</span><span>player</span><span style={{textAlign:"center"}}>correct</span><span style={{textAlign:"right"}}>pts</span></div>
+        {board.map((p,i)=>(
+          <div key={p.id} className="card rise" style={{animationDelay:`${i*30}ms`,display:"grid",gridTemplateColumns:"30px 1fr 64px 52px",alignItems:"center",gap:8,padding:"12px 14px",
+            border:i===0?`2px solid ${C.gold}`:`1.5px solid ${C.line}`,background:i===0?"#fffdf5":C.panel}}>
+            <span className="anton" style={{color:i===0?C.gold:C.muted,fontSize:19}}>{i+1}</span>
+            <span style={{display:"flex",alignItems:"center",gap:9,fontWeight:700,minWidth:0}}>
+              <span style={{width:24,height:24,flexShrink:0,background:colorFor(p.id,players),color:"#fff",display:"grid",placeItems:"center",fontSize:10,fontWeight:800,borderRadius:8}}>{initials(p.name)}</span>
+              <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.name}{p.id===me.pid&&<span className="mono" style={{fontSize:9,color:C.muted}}> (you)</span>}</span>
+              {i===0&&<span style={{fontSize:14}}>🏆</span>}
+            </span>
+            <span className="mono" style={{fontSize:13,color:C.muted,textAlign:"center"}}>{p.correct}/{p.made}</span>
+            <span className="anton" style={{fontSize:19,textAlign:"right",color:i===0?C.gold:C.navy}}>{p.pts}</span>
+          </div>
+        ))}
+        <p className="mono" style={{fontSize:10,color:C.muted,marginTop:6,lineHeight:1.6}}>"correct" = right picks out of games played. Points are bigger in later rounds.</p>
+      </div>}
+    </div>
+  );
+}
+
+/* ---- organizer ---- */
+function Admin({cfg,results,standings,players,picks,onResult,onClear,onConfig,onUpdatePlayer,onRemovePlayer,flash}){
+  const [sub,setSub]=useState("group");
+  return (
+    <div className="rise">
+      <p className="mono" style={{fontSize:11,color:C.muted,marginBottom:10,lineHeight:1.5}}>Organizer area — enter the real scores as games finish. Everyone's points update live.</p>
+      <div style={{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap"}}>
+        {[["group","GROUP SCORES"],["thirds","3RD PLACE"],["ko","KNOCKOUT WINNERS"],["scoring","POINTS"],["players","EDIT PLAYERS"]].map(([k,l])=>(
+          <button key={k} className="btn mono" onClick={()=>setSub(k)} style={{flex:"1 0 auto",background:sub===k?C.navy:C.panel,color:sub===k?"#fff":C.muted,border:`1.5px solid ${sub===k?"transparent":C.line}`,padding:"8px 6px",fontSize:10,borderRadius:9}}>{l}</button>
+        ))}
+      </div>
+      {sub==="group" && <AdminGroups results={results} onResult={onResult} onClear={onClear} />}
+      {sub==="thirds" && <AdminThirds cfg={cfg} standings={standings} onConfig={onConfig} />}
+      {sub==="ko" && <AdminKO cfg={cfg} results={results} standings={standings} onResult={onResult} onClear={onClear} />}
+      {sub==="scoring" && <AdminScoring cfg={cfg} onConfig={onConfig} flash={flash} />}
+      {sub==="players" && <PlayersAdmin players={players} picks={picks} onUpdate={onUpdatePlayer} onRemove={onRemovePlayer} flash={flash} />}
+    </div>
+  );
+}
+function ScoreEntry({mid,home,away,result,onResult,onClear}){
+  const [h,setH]=useState(result&&result.hs!=null?String(result.hs):"");
+  const [a,setA]=useState(result&&result.as!=null?String(result.as):"");
+  useEffect(()=>{setH(result&&result.hs!=null?String(result.hs):"");setA(result&&result.as!=null?String(result.as):"");},[result&&result.hs,result&&result.as]);
+  const sip={width:42,background:"#faf6ec",border:`2px solid ${C.line}`,color:C.text,padding:"7px",fontSize:15,textAlign:"center"};
+  const fin=result&&result.hs!=null;
+  return (
+    <div style={{display:"flex",alignItems:"center",gap:6,padding:"7px 0",borderTop:`1px solid ${C.line}`}}>
+      <Flag team={home} size={18}/><span style={{flex:1,fontSize:12,fontWeight:fin?700:400,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{home} v {away}</span><Flag team={away} size={18}/>
+      <input style={sip} inputMode="numeric" placeholder="–" value={h} onChange={e=>setH(e.target.value.replace(/\D/g,""))}/>
+      <input style={sip} inputMode="numeric" placeholder="–" value={a} onChange={e=>setA(e.target.value.replace(/\D/g,""))}/>
+      <button className="btn" disabled={h===""||a===""} onClick={()=>onResult(mid,{hs:+h,as:+a})} style={{background:(h!==""&&a!=="")?C.gold:C.line,color:C.navy,padding:"7px 9px",fontSize:11,borderRadius:8}}>{fin?"✓":"SET"}</button>
+      {fin && <button className="btn mono" onClick={()=>onClear(mid)} style={{background:"transparent",color:C.coral,border:`1.5px solid ${C.line}`,padding:"6px 7px",fontSize:10,borderRadius:8}}>×</button>}
+    </div>
+  );
+}
+function AdminGroups({results,onResult,onClear}){
+  const [g,setG]=useState("A");
+  return (
+    <div>
+      <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:10}}>
+        {GLETTERS.map(l=><button key={l} className="btn anton" onClick={()=>setG(l)} style={{background:g===l?C.gold:C.panel,color:g===l?C.navy:C.muted,border:`1.5px solid ${g===l?"transparent":C.line}`,padding:"6px 12px",fontSize:13,borderRadius:9}}>{l}</button>)}
+      </div>
+      <div className="card" style={{padding:"4px 14px 12px"}}>
+        {GROUP_MATCHES.filter(m=>m.group===g).map(m=><ScoreEntry key={m.id} mid={m.id} home={m.home} away={m.away} result={results[m.id]} onResult={onResult} onClear={onClear} />)}
+      </div>
+    </div>
+  );
+}
+function AdminThirds({cfg,standings,onConfig}){
+  const {top8,ranked}=qualifiedThirds(standings);
+  const allComplete=GLETTERS.every(g=>standings[g].complete);
+  const set=(slot,group)=>onConfig({...cfg,thirds:{...cfg.thirds,[slot]:group||undefined}});
+  return (
+    <div>
+      <p className="mono" style={{fontSize:11,color:C.muted,marginBottom:10,lineHeight:1.6}}>After all group games, FIFA assigns the 8 best 3rd-place teams to these knockout slots. Pick the group for each slot (matches the official assignment).{!allComplete&&" Finish all group scores first."}</p>
+      {allComplete && <div className="mono" style={{fontSize:11,color:C.navy,marginBottom:10,background:"#fbf3da",borderRadius:10,padding:"8px 10px"}}>Qualified 3rds: {ranked.slice(0,8).map(x=>`${x.g} (${x.row.team})`).join(", ")}</div>}
+      <div style={{display:"grid",gap:8}}>
+        {THIRD_SLOTS.map(slot=>{
+          const def=KO[slot]; const side=def.a.t==="T"?def.a:def.b;
+          return (
+            <div key={slot} className="card" style={{padding:"9px 11px",display:"flex",alignItems:"center",gap:8,boxShadow:"none"}}>
+              <span className="mono" style={{fontSize:11,color:C.muted,width:64}}>Slot {slot}</span>
+              <select value={cfg.thirds[slot]||""} onChange={e=>set(slot,e.target.value)} style={{flex:1,background:"#faf6ec",border:`2px solid ${C.line}`,color:C.text,padding:"9px",fontSize:13}}>
+                <option value="">— pick group —</option>
+                {side.cl.filter(g=>top8.has(g)).map(g=><option key={g} value={g}>3rd of {g} ({standings[g].ordered[2].team})</option>)}
+              </select>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+function AdminKO({cfg,results,standings,onResult,onClear}){
+  koCache={}; const resolved={}; KO_IDS.forEach(mid=>resolved[mid]=resolveMatch(mid,standings,results,cfg));
+  return (
+    <div style={{display:"grid",gap:8}}>
+      {KO_IDS.map(mid=>{
+        const {a,b,stage}=resolved[mid]; const r=results["M"+mid];
+        return (
+          <div key={mid} className="card" style={{padding:"9px 11px",boxShadow:"none"}}>
+            <div className="mono" style={{fontSize:9,color:C.muted,marginBottom:5}}>{STAGE_LABEL[stage]}</div>
+            {!a||!b ? <div className="mono" style={{fontSize:12,color:C.muted}}>waiting for teams…</div>
+            : <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                {[a,b].map(team=>(
+                  <button key={team} className="btn" onClick={()=>onResult("M"+mid,{w:team})} style={{flex:1,display:"flex",alignItems:"center",gap:7,padding:"9px",fontSize:12,fontWeight:700,
+                    background:r&&r.w===team?C.gold:C.panel,color:r&&r.w===team?C.navy:C.text,border:`2px solid ${r&&r.w===team?C.gold:C.line}`}}><Flag team={team} size={20}/>{team}</button>
+                ))}
+                {r&&r.w&&<button className="btn mono" onClick={()=>onClear("M"+mid)} style={{background:"transparent",color:C.coral,border:`1.5px solid ${C.line}`,padding:"7px 8px",fontSize:10,borderRadius:8}}>×</button>}
+              </div>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+function AdminScoring({cfg,onConfig,flash}){
+  const [p,setP]=useState({...cfg.pts});
+  const f={display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderTop:`1px solid ${C.line}`};
+  const ip={width:60,background:"#faf6ec",border:`2px solid ${C.line}`,color:C.text,padding:"7px",fontSize:14,textAlign:"center"};
+  const row=(k,l)=>(<div style={f}><span className="mono" style={{fontSize:12}}>{l}</span><input style={ip} inputMode="numeric" value={p[k]} onChange={e=>setP({...p,[k]:e.target.value.replace(/\D/g,"")})}/></div>);
+  return (
+    <div className="card" style={{padding:"4px 16px 14px"}}>
+      <p className="mono" style={{fontSize:11,color:C.muted,padding:"9px 0"}}>Points for each correct pick. Set them all to 1 for simple "1 point per correct guess".</p>
+      {row("group","Group game")}{row("R32","Round of 32")}{row("R16","Round of 16")}{row("QF","Quarterfinal")}{row("SF","Semifinal")}{row("3RD","3rd-place game")}{row("FINAL","The Final")}
+      <button className="btn anton" onClick={()=>{const np={};Object.keys(p).forEach(k=>np[k]=parseInt(p[k]||"0"));onConfig({...cfg,pts:np});flash("Points saved");}} style={{width:"100%",background:`linear-gradient(135deg,${C.gold},#f0c14b)`,color:C.navy,padding:12,fontSize:15,marginTop:12}}>SAVE POINTS</button>
+    </div>
+  );
+}
+
+function PlayersAdmin({players,picks,onUpdate,onRemove,flash}){
+  const list=Object.values(players).sort((a,b)=>a.name.localeCompare(b.name));
+  const pickCount=(pid)=>{let n=0;Object.values(picks||{}).forEach(mp=>{if(mp&&mp[pid]!=null)n++;});return n;};
+  return (
+    <div>
+      <p className="mono" style={{fontSize:11,color:C.muted,marginBottom:12,lineHeight:1.6}}>Fix a name, reset a forgotten PIN, or remove someone. Deleting a player also clears their picks — this can't be undone.</p>
+      {list.length===0
+        ? <div className="card mono" style={{textAlign:"center",color:C.muted,padding:"34px",fontSize:13}}>No players have joined yet.</div>
+        : <div style={{display:"grid",gap:8}}>
+            {list.map(p=><PlayerRow key={p.id} p={p} count={pickCount(p.id)} players={players} onUpdate={onUpdate} onRemove={onRemove} flash={flash} />)}
+          </div>}
+    </div>
+  );
+}
+function PlayerRow({p,count,players,onUpdate,onRemove,flash}){
+  const [editing,setEditing]=useState(false);
+  const [name,setName]=useState(p.name);
+  const [pin,setPin]=useState(p.pin);
+  useEffect(()=>{setName(p.name);setPin(p.pin);},[p.name,p.pin]);
+  const ip={background:"#faf6ec",border:`2px solid ${C.line}`,color:C.text,padding:"9px 10px",fontSize:14};
+  const save=()=>{
+    if(!name.trim())return flash("Name can't be empty");
+    if(!/^\d{4}$/.test(pin))return flash("PIN must be 4 numbers");
+    const dup=Object.values(players).find(x=>x.id!==p.id && x.name.trim().toLowerCase()===name.trim().toLowerCase());
+    if(dup)return flash("Another player already uses that name");
+    onUpdate(p.id,{...p,name:name.trim(),pin});
+    setEditing(false); flash("Saved");
+  };
+  const del=()=>{ if(window.confirm(`Delete "${p.name}"? This removes their ${count} pick(s) too and can't be undone.`)) onRemove(p.id); };
+  return (
+    <div className="card" style={{padding:"11px 13px",boxShadow:"none"}}>
+      <div style={{display:"flex",alignItems:"center",gap:10}}>
+        <span style={{width:30,height:30,flexShrink:0,background:colorFor(p.id,players),color:"#fff",display:"grid",placeItems:"center",fontSize:11,fontWeight:800,borderRadius:9}}>{initials(p.name)}</span>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.name}</div>
+          <div className="mono" style={{fontSize:10,color:C.muted}}>PIN {p.pin} · {count} pick{count===1?"":"s"}</div>
+        </div>
+        {!editing && <>
+          <button className="btn mono" onClick={()=>setEditing(true)} style={{background:C.panel,color:C.navy,border:`1.5px solid ${C.line}`,padding:"7px 11px",fontSize:11,borderRadius:9}}>edit</button>
+          <button className="btn mono" onClick={del} style={{background:C.panel,color:C.coral,border:`1.5px solid ${C.line}`,padding:"7px 11px",fontSize:11,borderRadius:9}}>delete</button>
+        </>}
+      </div>
+      {editing && (
+        <div style={{marginTop:11,display:"grid",gap:8}}>
+          <div style={{display:"flex",gap:8}}>
+            <input style={{...ip,flex:1}} value={name} onChange={e=>setName(e.target.value)} placeholder="name" />
+            <input style={{...ip,width:90}} inputMode="numeric" maxLength={4} value={pin} onChange={e=>setPin(e.target.value.replace(/\D/g,""))} placeholder="PIN" />
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            <button className="btn anton" onClick={save} style={{flex:1,background:`linear-gradient(135deg,${C.gold},#f0c14b)`,color:C.navy,padding:"10px",fontSize:14}}>SAVE</button>
+            <button className="btn mono" onClick={()=>{setName(p.name);setPin(p.pin);setEditing(false);}} style={{background:C.panel,color:C.muted,border:`1.5px solid ${C.line}`,padding:"10px 16px",fontSize:12,borderRadius:9}}>cancel</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Login({onLogin,toast,mode}){
+  const [name,setName]=useState(""),[pin,setPin]=useState("");
+  const ip={width:"100%",background:C.panel,border:`2px solid ${C.line}`,color:C.text,padding:"14px",fontSize:16,marginTop:10};
+  return (
+    <div style={{minHeight:"100vh",display:"grid",placeItems:"center",padding:20}}>
+      <div className="rise" style={{width:"100%",maxWidth:380}}>
+        <div style={{width:54,height:54,background:`linear-gradient(135deg,${C.gold},#f0c14b)`,borderRadius:15,display:"grid",placeItems:"center",transform:"rotate(-5deg)",boxShadow:"0 6px 16px rgba(221,159,35,.35)",marginBottom:18}}><span className="anton" style={{color:C.navy,fontSize:26,transform:"rotate(5deg)"}}>26</span></div>
+        <div className="anton" style={{fontSize:40,lineHeight:.95,color:C.navy}}>WORLD CUP<br/><span style={{color:C.gold}}>PICK'EM</span></div>
+        <p className="mono" style={{color:C.muted,fontSize:12,margin:"16px 0 22px",lineHeight:1.6}}>Pick who wins every match. Most correct picks wins! Choose a name and a 4-number PIN so you can log back in.</p>
+        <input style={ip} placeholder="your name" value={name} onChange={e=>setName(e.target.value)} />
+        <input style={ip} placeholder="4-number PIN (e.g. 1234)" inputMode="numeric" maxLength={4} value={pin} onChange={e=>setPin(e.target.value.replace(/\D/g,""))} onKeyDown={e=>e.key==="Enter"&&onLogin(name,pin)} />
+        <button className="btn anton" onClick={()=>onLogin(name,pin)} style={{width:"100%",background:`linear-gradient(135deg,${C.gold},#f0c14b)`,color:C.navy,padding:15,fontSize:18,marginTop:16,boxShadow:"0 5px 14px rgba(221,159,35,.3)"}}>START PLAYING →</button>
+        {mode==="local"
+          ? <p className="mono" style={{color:C.coral,fontSize:11,marginTop:14,lineHeight:1.5}}>● Practice mode — saved on this device only. Add a Firebase config (file comments) so friends can play together live.</p>
+          : <p className="mono" style={{color:"#2f9e44",fontSize:11,marginTop:14,fontWeight:700}}>● Live — everyone plays together.</p>}
+        {toast && <p className="mono" style={{color:C.coral,fontSize:12,marginTop:12}}>{toast}</p>}
+      </div>
+    </div>
+  );
+}
+function AdminGate({hasPin,onUnlock}){
+  const [pin,setPin]=useState("");
+  return (
+    <div className="rise card" style={{padding:22,textAlign:"center",borderTop:`5px solid ${C.gold}`}}>
+      <div className="anton" style={{fontSize:18,color:C.navy}}>{hasPin?"ORGANIZER ONLY":"BECOME THE ORGANIZER"}</div>
+      <p className="mono" style={{fontSize:12,color:C.muted,margin:"8px 0 16px",lineHeight:1.5}}>{hasPin?"Enter the organizer PIN to type in match results.":"One person runs the pool and enters results. Set a 4-number organizer PIN."}</p>
+      <input inputMode="numeric" maxLength={4} value={pin} onChange={e=>setPin(e.target.value.replace(/\D/g,""))} placeholder="organizer PIN" onKeyDown={e=>e.key==="Enter"&&onUnlock(pin)}
+        style={{background:"#faf6ec",border:`2px solid ${C.line}`,color:C.text,padding:"12px",fontSize:16,textAlign:"center",width:170}} />
+      <div><button className="btn anton" onClick={()=>onUnlock(pin)} style={{background:`linear-gradient(135deg,${C.gold},#f0c14b)`,color:C.navy,padding:"11px 28px",fontSize:15,marginTop:14}}>{hasPin?"UNLOCK":"SET PIN"}</button></div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
