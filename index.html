@@ -213,8 +213,12 @@ function scoreboard(players,predictions,results,cfg){
     // knockout advancement
     const {bracket}=playerBracket(pred);
     ["R32","R16","QF","SF","3RD","FINAL"].forEach(round=>{ROUND_MATCHES[round].forEach(m=>{const v=pred.ko&&pred.ko["M"+m];const br=bracket[m];if(!v||(v!==br.a&&v!==br.b))return;if(radv[round].has(v)){pts+=(cfg.pts[round]||1);correct++;}});});
-    return {...p,pts,correct};
-  }).sort((a,b)=>b.pts-a.pts||b.correct-a.correct||a.name.localeCompare(b.name));
+    return {...p,pts,correct,tb:(pred.finalGoals==null?null:pred.finalGoals)};
+  }).sort((a,b)=>{
+    if(b.pts!==a.pts)return b.pts-a.pts;
+    if(cfg.finalGoals!=null){const da=a.tb==null?Infinity:Math.abs(a.tb-cfg.finalGoals),db=b.tb==null?Infinity:Math.abs(b.tb-cfg.finalGoals);if(da!==db)return da-db;}
+    return b.correct-a.correct||a.name.localeCompare(b.name);
+  });
 }
 
 function ProgressBar({done,total,label}){const pct=total?Math.round(done/total*100):0;return (
@@ -244,6 +248,7 @@ function App(){
   function setOrder(L,arr){if(locked)return;const p=myPred();Store.savePrediction(me.pid,{...p,order:{...p.order,[L]:arr}});}
   function toggleThird(L){if(locked)return;const p=myPred();const cur=p.thirds||[];const has=cur.includes(L);if(!has&&cur.length>=8)return flash("You've picked 8 already");Store.savePrediction(me.pid,{...p,thirds:has?cur.filter(x=>x!==L):[...cur,L]});}
   function pickKO(mid,team){if(locked)return;const p=myPred();const ko={...(p.ko||{}),["M"+mid]:team};downstreamKO(mid).forEach(d=>delete ko["M"+d]);Store.savePrediction(me.pid,{...p,ko});}
+  function setTiebreaker(n){if(locked)return;const p=myPred();Store.savePrediction(me.pid,{...p,finalGoals:n});}
 
   if(!ready)return <div className="boot"><span className="anton" style={{fontSize:28,color:C.gold}}>LOADING…</span></div>;
   if(!me)return <Login onLogin={login} toast={toast} mode={Store.mode}/>;
@@ -269,7 +274,7 @@ function App(){
       <div style={{maxWidth:1100,margin:"0 auto",padding:"18px 14px 90px"}}>
         {tab==="groups" && <GroupsTab pred={myPred()} results={results} locked={locked} setOrder={setOrder} onNext={()=>setTab("thirds")}/>}
         {tab==="thirds" && <ThirdsTab pred={myPred()} results={results} locked={locked} toggleThird={toggleThird} onNext={()=>setTab("bracket")} onBack={()=>setTab("groups")}/>}
-        {tab==="bracket" && <BracketTab pred={myPred()} results={results} locked={locked} pickKO={pickKO} cfg={config}/>}
+        {tab==="bracket" && <BracketTab pred={myPred()} results={results} locked={locked} pickKO={pickKO} cfg={config} onTiebreaker={setTiebreaker}/>}
         {tab==="board" && <Board board={board} players={players} me={me} cfg={config}/>}
         {tab==="admin" && (admin
           ? <Admin cfg={config} results={results} standings={allStandings(results)} players={players} predictions={predictions}
@@ -371,7 +376,7 @@ function ThirdsTab({pred,results,locked,toggleThird,onNext,onBack}){
   </div>);}
 
 /* ---- 3. BRACKET TREE (full FIFA-style tree) ---- */
-function BracketTab({pred,results,locked,pickKO,cfg}){
+function BracketTab({pred,results,locked,pickKO,cfg,onTiebreaker}){
   const {bracket}=playerBracket(pred); const need=(pred.thirds||[]).length<8;
   const radv=locked?realAdvancers(results):null;
   const valid=m=>{const v=pred.ko&&pred.ko["M"+m];return v&&(v===bracket[m].a||v===bracket[m].b)?v:null;};
@@ -444,19 +449,29 @@ function BracketTab({pred,results,locked,pickKO,cfg}){
       <div className="anton" style={{fontSize:14,color:C.navy,marginBottom:6}}>3RD-PLACE PLAYOFF <span className="mono" style={{fontSize:10,color:C.muted,fontWeight:400}}>· {cfg.pts["3RD"]} pts</span></div>
       <div style={{background:C.navy,borderRadius:10,padding:"6px 8px",maxWidth:200}}><Cell mid={103} team={bracket[103].a}/><Cell mid={103} team={bracket[103].b}/></div>
     </div>
+    <div className="card" style={{marginTop:16,padding:"14px 16px",borderColor:C.blue,borderWidth:2}}>
+      <div className="anton" style={{fontSize:15,color:C.navy,marginBottom:4}}>⚽ TIEBREAKER</div>
+      <p className="mono" style={{fontSize:11,color:C.muted,lineHeight:1.55,marginBottom:10}}>Total goals scored in the <b>Final</b> (both teams combined). If two people tie on points, whoever's closest wins. {locked?"":"Set it before the tournament locks."}</p>
+      <div style={{display:"flex",alignItems:"center",gap:10}}>
+        <input disabled={locked} inputMode="numeric" placeholder="e.g. 3" value={pred.finalGoals==null?"":pred.finalGoals}
+          onChange={e=>{const v=e.target.value.replace(/\D/g,"");onTiebreaker(v===""?null:Math.min(20,parseInt(v)));}}
+          style={{width:90,background:"#faf6ec",border:`2px solid ${C.line}`,color:C.text,padding:"11px",fontSize:18,textAlign:"center",fontWeight:700,borderRadius:10}}/>
+        <span className="mono" style={{fontSize:12,color:pred.finalGoals==null?C.coral:"#2f9e44",fontWeight:700}}>{pred.finalGoals==null?"not set yet":"saved ✓"}</span>
+      </div>
+    </div>
   </div>);}
 
 function Board({board,players,me,cfg}){return (<div className="rise">
   {board.length===0?<div className="card mono" style={{textAlign:"center",color:C.muted,padding:"40px"}}>No players yet.</div>:
   <div style={{display:"grid",gap:8}}>
     <div className="mono" style={{display:"grid",gridTemplateColumns:"30px 1fr 64px 52px",gap:8,padding:"0 14px",fontSize:10,color:C.muted,textTransform:"uppercase",fontWeight:700}}><span>#</span><span>player</span><span style={{textAlign:"center"}}>correct</span><span style={{textAlign:"right"}}>pts</span></div>
-    {board.map((p,i)=>(<div key={p.id} className="card rise" style={{animationDelay:`${i*30}ms`,display:"grid",gridTemplateColumns:"30px 1fr 64px 52px",alignItems:"center",gap:8,padding:"12px 14px",border:i===0?`2px solid ${C.gold}`:`1.5px solid ${C.line}`,background:i===0?"#fffdf5":C.panel}}>
+    {board.map((p,i)=>{const tied=board.some((q,j)=>j!==i&&q.pts===p.pts);return (<div key={p.id} className="card rise" style={{animationDelay:`${i*30}ms`,display:"grid",gridTemplateColumns:"30px 1fr 64px 52px",alignItems:"center",gap:8,padding:"12px 14px",border:i===0?`2px solid ${C.gold}`:`1.5px solid ${C.line}`,background:i===0?"#fffdf5":C.panel}}>
       <span className="anton" style={{color:i===0?C.gold:C.muted,fontSize:19}}>{i+1}</span>
-      <span style={{display:"flex",alignItems:"center",gap:9,fontWeight:700,minWidth:0}}><span style={{width:24,height:24,flexShrink:0,background:colorFor(p.id,players),color:"#fff",display:"grid",placeItems:"center",fontSize:10,fontWeight:800,borderRadius:8}}>{inits(p.name)}</span><span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.name}{p.id===me.pid&&<span className="mono" style={{fontSize:9,color:C.muted}}> (you)</span>}</span>{i===0&&<span style={{fontSize:14}}>🏆</span>}</span>
+      <span style={{display:"flex",alignItems:"center",gap:9,fontWeight:700,minWidth:0}}><span style={{width:24,height:24,flexShrink:0,background:colorFor(p.id,players),color:"#fff",display:"grid",placeItems:"center",fontSize:10,fontWeight:800,borderRadius:8}}>{inits(p.name)}</span><span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.name}{p.id===me.pid&&<span className="mono" style={{fontSize:9,color:C.muted}}> (you)</span>}</span>{i===0&&<span style={{fontSize:14}}>🏆</span>}{tied&&<span className="mono" style={{fontSize:8,color:C.blue,fontWeight:700,border:`1px solid ${C.blue}`,borderRadius:5,padding:"1px 4px"}}>TIE</span>}</span>
       <span className="mono" style={{fontSize:13,color:C.muted,textAlign:"center"}}>{p.correct}</span>
       <span className="anton" style={{fontSize:19,textAlign:"right",color:i===0?C.gold:C.navy}}>{p.pts}</span>
-    </div>))}
-    <p className="mono" style={{fontSize:10,color:C.muted,marginTop:6,lineHeight:1.6}}>Points: group spot {cfg.pts.group}, each third {cfg.pts.thirds}, then advancing teams R32 {cfg.pts.R32} · R16 {cfg.pts.R16} · QF {cfg.pts.QF} · SF {cfg.pts.SF} · Final {cfg.pts.FINAL}.</p>
+    </div>);})}
+    <p className="mono" style={{fontSize:10,color:C.muted,marginTop:6,lineHeight:1.6}}>Points: group spot {cfg.pts.group}, each third {cfg.pts.thirds}, then advancing teams R32 {cfg.pts.R32} · R16 {cfg.pts.R16} · QF {cfg.pts.QF} · SF {cfg.pts.SF} · Final {cfg.pts.FINAL}. Ties break by closest guess to total goals in the Final, then most correct picks.</p>
   </div>}
 </div>);}
 
@@ -486,7 +501,7 @@ function Admin({cfg,results,standings,players,predictions,onResult,onClear,onCon
     </div>}
     {sub==="group" && <AdminGroups results={results} onResult={onResult} onClear={onClear}/>}
     {sub==="thirds" && <AdminRealThirds standings={standings}/>}
-    {sub==="ko" && <AdminKO results={results} standings={standings} cfg={cfg} onResult={onResult} onClear={onClear}/>}
+    {sub==="ko" && <AdminKO results={results} standings={standings} cfg={cfg} onResult={onResult} onClear={onClear} onConfig={onConfig}/>}
     {sub==="scoring" && <AdminScoring cfg={cfg} onConfig={onConfig} flash={flash}/>}
     {sub==="players" && <PlayersAdmin players={players} predictions={predictions} onUpdate={onUpdatePlayer} onRemove={onRemovePlayer} flash={flash}/>}
     {sub==="picks" && <PicksAdmin players={players} predictions={predictions}/>}
@@ -499,8 +514,14 @@ function ScoreEntry({mid,home,away,result,onResult,onClear}){
   return (<div style={{display:"flex",alignItems:"center",gap:6,padding:"7px 0",borderTop:`1px solid ${C.line}`}}><Flag team={home} size={18}/><span style={{flex:1,fontSize:12,fontWeight:fin?700:400,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{home} v {away}</span><Flag team={away} size={18}/><input style={sip} inputMode="numeric" placeholder="–" value={h} onChange={e=>setH(e.target.value.replace(/\D/g,""))}/><input style={sip} inputMode="numeric" placeholder="–" value={a} onChange={e=>setA(e.target.value.replace(/\D/g,""))}/><button className="btn" disabled={h===""||a===""} onClick={()=>onResult(mid,{hs:+h,as:+a})} style={{background:(h!==""&&a!=="")?C.gold:C.line,color:C.navy,padding:"7px 9px",fontSize:11,borderRadius:8}}>{fin?"✓":"SET"}</button>{fin&&<button className="btn mono" onClick={()=>onClear(mid)} style={{background:"transparent",color:C.coral,border:`1.5px solid ${C.line}`,padding:"6px 7px",fontSize:10,borderRadius:8}}>×</button>}</div>);}
 function AdminGroups({results,onResult,onClear}){const [g,setG]=useState("A");return (<div><div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:10}}>{GLETTERS.map(l=><button key={l} className="btn anton" onClick={()=>setG(l)} style={{background:g===l?C.gold:C.panel,color:g===l?C.navy:C.muted,border:`1.5px solid ${g===l?"transparent":C.line}`,padding:"6px 12px",fontSize:13,borderRadius:9}}>{l}</button>)}</div><div className="card" style={{padding:"4px 14px 12px"}}>{GROUP_MATCHES.filter(m=>m.group===g).map(m=><ScoreEntry key={m.id} mid={m.id} home={m.home} away={m.away} result={results[m.id]} onResult={onResult} onClear={onClear}/>)}</div></div>);}
 function AdminRealThirds({standings}){const done=GLETTERS.every(g=>standings[g].complete);const rt=done?realThirdGroups(standings):null;return (<div className="card" style={{padding:14}}><p className="mono" style={{fontSize:11,color:C.muted,lineHeight:1.6}}>The 8 best real third-place teams are computed automatically from the group scores you enter (no input needed here).</p>{done?<div className="mono" style={{fontSize:12,marginTop:10,lineHeight:1.8}}>{GLETTERS.map(L=>{const t=standings[L].ordered[2].team;const inn=rt.has(L);return <div key={L} style={{color:inn?"#2f9e44":C.muted}}>{L}: {t} {inn?"✓ qualifies":"— out"}</div>;})}</div>:<p className="mono" style={{fontSize:11,color:C.coral,marginTop:8}}>Enter all group scores first.</p>}</div>);}
-function AdminKO({results,standings,cfg,onResult,onClear}){koCache={};const tmap=cfg.thirds||{};const res={};const kores={};KO_IDS.forEach(m=>{const r=results["M"+m];if(r&&r.w)kores["M"+m]={w:r.w};});KO_IDS.forEach(m=>res[m]=resolveMatch(m,standings,kores,tmap));
-  return (<div><div className="card mono" style={{padding:"10px 13px",marginBottom:10,fontSize:11,color:C.muted,lineHeight:1.6,boxShadow:"none"}}>Real bracket fills as you enter results. Note: the official 3rd-place slot assignment must be set in your code/config for exact real matchups; winners still score correctly by team.</div>
+function AdminKO({results,standings,cfg,onResult,onClear,onConfig}){koCache={};const tmap=cfg.thirds||{};const res={};const kores={};KO_IDS.forEach(m=>{const r=results["M"+m];if(r&&r.w)kores["M"+m]={w:r.w};});KO_IDS.forEach(m=>res[m]=resolveMatch(m,standings,kores,tmap));
+  return (<div>
+    <div className="card" style={{padding:"11px 13px",marginBottom:10,boxShadow:"none",borderColor:C.blue}}>
+      <div className="anton" style={{fontSize:14,color:C.navy,marginBottom:3}}>⚽ TIEBREAKER — REAL GOALS IN FINAL</div>
+      <p className="mono" style={{fontSize:10,color:C.muted,lineHeight:1.5,marginBottom:8}}>After the Final, enter the total goals both teams scored. Ties on points break by who guessed closest. (This does not lock the app.)</p>
+      <div style={{display:"flex",alignItems:"center",gap:8}}><input inputMode="numeric" placeholder="–" value={cfg.finalGoals==null?"":cfg.finalGoals} onChange={e=>{const v=e.target.value.replace(/\D/g,"");onConfig({...cfg,finalGoals:v===""?null:parseInt(v)});}} style={{width:70,background:"#faf6ec",border:`2px solid ${C.line}`,color:C.text,padding:"9px",fontSize:16,textAlign:"center",fontWeight:700,borderRadius:9}}/><span className="mono" style={{fontSize:11,color:cfg.finalGoals==null?C.muted:"#2f9e44"}}>{cfg.finalGoals==null?"not entered":"set ✓"}</span></div>
+    </div>
+    <div className="card mono" style={{padding:"10px 13px",marginBottom:10,fontSize:11,color:C.muted,lineHeight:1.6,boxShadow:"none"}}>Real bracket fills as you enter results. Note: the official 3rd-place slot assignment must be set in your code/config for exact real matchups; winners still score correctly by team.</div>
   <div style={{display:"grid",gap:8}}>{KO_IDS.map(mid=>{const {a,b,stage}=res[mid];const r=results["M"+mid];return (<div key={mid} className="card" style={{padding:"9px 11px",boxShadow:"none"}}><div className="mono" style={{fontSize:9,color:C.muted,marginBottom:5}}>{STAGE_LABEL[stage]}</div>{!a||!b?<div className="mono" style={{fontSize:12,color:C.muted}}>waiting…</div>:<div style={{display:"flex",gap:6,alignItems:"center"}}>{[a,b].map(t=><button key={t} className="btn" onClick={()=>onResult("M"+mid,{w:t})} style={{flex:1,display:"flex",alignItems:"center",gap:7,padding:"9px",fontSize:12,fontWeight:700,background:r&&r.w===t?C.gold:C.panel,color:r&&r.w===t?C.navy:C.text,border:`2px solid ${r&&r.w===t?C.gold:C.line}`}}><Flag team={t} size={20}/>{CODES[t]||t}</button>)}{r&&r.w&&<button className="btn mono" onClick={()=>onClear("M"+mid)} style={{background:"transparent",color:C.coral,border:`1.5px solid ${C.line}`,padding:"7px 8px",fontSize:10,borderRadius:8}}>×</button>}</div>}</div>);})}</div></div>);}
 function AdminScoring({cfg,onConfig,flash}){const [p,setP]=useState({...cfg.pts});const f={display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderTop:`1px solid ${C.line}`};const ip={width:60,background:"#faf6ec",border:`2px solid ${C.line}`,color:C.text,padding:"7px",fontSize:14,textAlign:"center"};const row=(k,l)=>(<div style={f}><span className="mono" style={{fontSize:12}}>{l}</span><input style={ip} inputMode="numeric" value={p[k]} onChange={e=>setP({...p,[k]:e.target.value.replace(/\D/g,"")})}/></div>);
   return (<div className="card" style={{padding:"4px 16px 14px"}}><p className="mono" style={{fontSize:11,color:C.muted,padding:"9px 0"}}>Points per correct prediction.</p>{row("group","Group spot (1st/2nd)")}{row("thirds","Each correct third")}{row("R32","Reach Round of 16")}{row("R16","Reach Quarters")}{row("QF","Reach Semis")}{row("SF","Reach Final")}{row("3RD","Win 3rd place")}{row("FINAL","Champion")}<button className="btn anton" onClick={()=>{const np={};Object.keys(p).forEach(k=>np[k]=parseInt(p[k]||"0"));onConfig({...cfg,pts:np});flash("Points saved");}} style={{width:"100%",background:`linear-gradient(135deg,${C.gold},#f0c14b)`,color:C.navy,padding:12,fontSize:15,marginTop:12}}>SAVE POINTS</button></div>);}
