@@ -238,6 +238,7 @@ function App(){
   useEffect(()=>{if(me){try{if(!localStorage.getItem(HELPKEY)){setHelp(true);localStorage.setItem(HELPKEY,"1");}}catch(e){}}},[me]);
   const {players,predictions,results,config}=s;
   const locked=config.locked||anyResult(results);
+  const tbLocked=config.tbLocked||config.finalGoals!=null;
   const saveMe=m=>{setMe(m);try{localStorage.setItem(MEKEY,JSON.stringify(m));}catch(e){}};
   const logout=()=>{setMe(null);setAdmin(false);try{localStorage.removeItem(MEKEY);}catch(e){}};
   function login(name,pin){if(!name.trim())return flash("Type your name");if(!/^\d{4}$/.test(pin))return flash("PIN must be 4 numbers");
@@ -248,7 +249,7 @@ function App(){
   function setOrder(L,arr){if(locked)return;const p=myPred();Store.savePrediction(me.pid,{...p,order:{...p.order,[L]:arr}});}
   function toggleThird(L){if(locked)return;const p=myPred();const cur=p.thirds||[];const has=cur.includes(L);if(!has&&cur.length>=8)return flash("You've picked 8 already");Store.savePrediction(me.pid,{...p,thirds:has?cur.filter(x=>x!==L):[...cur,L]});}
   function pickKO(mid,team){if(locked)return;const p=myPred();const ko={...(p.ko||{}),["M"+mid]:team};downstreamKO(mid).forEach(d=>delete ko["M"+d]);Store.savePrediction(me.pid,{...p,ko});}
-  function setTiebreaker(n){if(locked)return;const p=myPred();Store.savePrediction(me.pid,{...p,finalGoals:n});}
+  function setTiebreaker(n){if(tbLocked)return;const p=myPred();Store.savePrediction(me.pid,{...p,finalGoals:n});}
 
   if(!ready)return <div className="boot"><span className="anton" style={{fontSize:28,color:C.gold}}>LOADING…</span></div>;
   if(!me)return <Login onLogin={login} toast={toast} mode={Store.mode}/>;
@@ -274,7 +275,7 @@ function App(){
       <div style={{maxWidth:1100,margin:"0 auto",padding:"18px 14px 90px"}}>
         {tab==="groups" && <GroupsTab pred={myPred()} results={results} locked={locked} setOrder={setOrder} onNext={()=>setTab("thirds")}/>}
         {tab==="thirds" && <ThirdsTab pred={myPred()} results={results} locked={locked} toggleThird={toggleThird} onNext={()=>setTab("bracket")} onBack={()=>setTab("groups")}/>}
-        {tab==="bracket" && <BracketTab pred={myPred()} results={results} locked={locked} pickKO={pickKO} cfg={config} onTiebreaker={setTiebreaker}/>}
+        {tab==="bracket" && <BracketTab pred={myPred()} results={results} locked={locked} tbLocked={tbLocked} pickKO={pickKO} cfg={config} onTiebreaker={setTiebreaker}/>}
         {tab==="board" && <Board board={board} players={players} me={me} cfg={config}/>}
         {tab==="admin" && (admin
           ? <Admin cfg={config} results={results} standings={allStandings(results)} players={players} predictions={predictions}
@@ -376,7 +377,7 @@ function ThirdsTab({pred,results,locked,toggleThird,onNext,onBack}){
   </div>);}
 
 /* ---- 3. BRACKET TREE (full FIFA-style tree) ---- */
-function BracketTab({pred,results,locked,pickKO,cfg,onTiebreaker}){
+function BracketTab({pred,results,locked,tbLocked,pickKO,cfg,onTiebreaker}){
   const {bracket}=playerBracket(pred); const need=(pred.thirds||[]).length<8;
   const radv=locked?realAdvancers(results):null;
   const valid=m=>{const v=pred.ko&&pred.ko["M"+m];return v&&(v===bracket[m].a||v===bracket[m].b)?v:null;};
@@ -450,12 +451,12 @@ function BracketTab({pred,results,locked,pickKO,cfg,onTiebreaker}){
       <div style={{background:C.navy,borderRadius:10,padding:"6px 8px",maxWidth:200}}><Cell mid={103} team={bracket[103].a}/><Cell mid={103} team={bracket[103].b}/></div>
     </div>
     <div className="card" style={{marginTop:16,padding:"14px 16px",borderColor:C.blue,borderWidth:2}}>
-      <div className="anton" style={{fontSize:15,color:C.navy,marginBottom:4}}>⚽ TIEBREAKER</div>
-      <p className="mono" style={{fontSize:11,color:C.muted,lineHeight:1.55,marginBottom:10}}>Total goals scored in the <b>Final</b> (both teams combined). If two people tie on points, whoever's closest wins. {locked?"":"Set it before the tournament locks."}</p>
+      <div className="anton" style={{fontSize:15,color:C.navy,marginBottom:4}}>⚽ TIEBREAKER {tbLocked&&<span className="mono" style={{fontSize:10,color:C.coral}}>· LOCKED</span>}</div>
+      <p className="mono" style={{fontSize:11,color:C.muted,lineHeight:1.55,marginBottom:10}}>Total goals scored in the <b>Final</b> (both teams combined). If two people tie on points, whoever's closest wins. {tbLocked?"This is now locked.":"You can set or change it right up until the Final."}</p>
       <div style={{display:"flex",alignItems:"center",gap:10}}>
-        <input disabled={locked} inputMode="numeric" placeholder="e.g. 3" value={pred.finalGoals==null?"":pred.finalGoals}
+        <input disabled={tbLocked} inputMode="numeric" placeholder="e.g. 3" value={pred.finalGoals==null?"":pred.finalGoals}
           onChange={e=>{const v=e.target.value.replace(/\D/g,"");onTiebreaker(v===""?null:Math.min(20,parseInt(v)));}}
-          style={{width:90,background:"#faf6ec",border:`2px solid ${C.line}`,color:C.text,padding:"11px",fontSize:18,textAlign:"center",fontWeight:700,borderRadius:10}}/>
+          style={{width:90,background:tbLocked?"#eee7d3":"#faf6ec",border:`2px solid ${C.line}`,color:C.text,padding:"11px",fontSize:18,textAlign:"center",fontWeight:700,borderRadius:10,opacity:tbLocked?.6:1}}/>
         <span className="mono" style={{fontSize:12,color:pred.finalGoals==null?C.coral:"#2f9e44",fontWeight:700}}>{pred.finalGoals==null?"not set yet":"saved ✓"}</span>
       </div>
     </div>
@@ -489,6 +490,10 @@ function Admin({cfg,results,standings,players,predictions,onResult,onClear,onCon
       <div className="card" style={{padding:14}}>
         <label style={{display:"flex",alignItems:"center",gap:10,cursor:locked&&anyResult(results)?"default":"pointer",fontSize:14,fontWeight:700}}><input type="checkbox" checked={locked} disabled={anyResult(results)} onChange={e=>onConfig({...cfg,locked:e.target.checked})} style={{width:20,height:20,accentColor:C.gold}}/>Lock all predictions</label>
         <p className="mono" style={{fontSize:11,color:C.muted,marginTop:8,lineHeight:1.6}}>Turn this on right before the first match kicks off — players can't edit after. It also locks automatically once you enter any real result below.</p>
+      </div>
+      <div className="card" style={{padding:14,marginTop:12}}>
+        <label style={{display:"flex",alignItems:"center",gap:10,cursor:cfg.finalGoals!=null?"default":"pointer",fontSize:14,fontWeight:700}}><input type="checkbox" checked={cfg.tbLocked||cfg.finalGoals!=null} disabled={cfg.finalGoals!=null} onChange={e=>onConfig({...cfg,tbLocked:e.target.checked})} style={{width:20,height:20,accentColor:C.blue}}/>Lock the tiebreaker</label>
+        <p className="mono" style={{fontSize:11,color:C.muted,marginTop:8,lineHeight:1.6}}>Separate from the main lock — leave this OFF so players can still set their goals-in-the-final guess after the bracket locks. Turn it on before the Final kicks off. It also locks by itself once you enter the real final goal total.</p>
       </div>
       <div className="card" style={{padding:14,marginTop:12}}>
         <div className="anton" style={{fontSize:15,color:C.navy,marginBottom:2}}>RESET RESULTS</div>
